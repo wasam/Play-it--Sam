@@ -1,5 +1,3 @@
-
-
 import java.util.Iterator;
 
 import javax.sound.midi.InvalidMidiDataException;
@@ -12,7 +10,11 @@ import processing.core.*;
 import ddf.minim.analysis.*;
 import ddf.minim.*;
 
-
+/**
+ * @created 2011 December 15th
+ * @author Samuel Walz <samuel.walz@gmail.com>
+ * 
+ */
 public class PlayItSam extends PApplet {
 	 
 	
@@ -276,23 +278,22 @@ public class PlayItSam extends PApplet {
 	@Override
 	public void draw()
 	{
-		if (!drawAnalysis) return;
 		
 		strokeWeight(1);
-	  background(0);
+		background(0);
 	  
-	  int w = new Integer(freqDisplayWidth/frequenciesOfInterest.length);
-	  
-	  
-	  
-	  
-	  int currentLine = freqHistoryHeight/lineHeight + 1;
-	  
-	  
-	  boolean thereHasBeenAPeak = false;
-	  
-	  historyBuffer.beginDraw();
-	  historyBuffer.copy(0, lineHeight, historyBuffer.width, historyBuffer.height-lineHeight, 
+		int w = new Integer(freqDisplayWidth/frequenciesOfInterest.length);
+		  
+		  
+		  
+		  
+		int currentLine = freqHistoryHeight/lineHeight + 1;
+		  
+		  
+		boolean thereHasBeenAPeak = false;
+		  
+		historyBuffer.beginDraw();
+		historyBuffer.copy(0, lineHeight, historyBuffer.width, historyBuffer.height-lineHeight, 
 			  0, 0, historyBuffer.width, historyBuffer.height-lineHeight);
 	  
 	  
@@ -303,59 +304,62 @@ public class PlayItSam extends PApplet {
 	  
 	  
 	  
-	  // draw the logarithmic averages
-	  if (drawAnalysis) fft.forward(myinput.mix);
+		// analyse next piece of sound
+		fft.forward(myinput.mix);
 	  
 	 
 	 
 	  
-	  float strongestPitch = 0f;
-	  for(int i = 0; i < frequenciesOfInterest.length; i++)
-	  {
+		float strongestPitch = 0f;
+		for(int i = 0; i < frequenciesOfInterest.length; i++)
+		{
 		
-		noStroke();
-		fill(100);
-	    // draw a rectangle for each average, multiply the value by 5 so we can see it better
-		float freqStrength = fft.getFreq(frequenciesOfInterest[i]);
-		//System.out.println(freqStrength);
+			noStroke();
+			fill(100);
+		    // draw a rectangle for each average, multiply the value by 5 so we can see it better
+			float freqStrength = fft.getFreq(frequenciesOfInterest[i]);
+			//System.out.println(freqStrength);
+			
+			rect(i*w, freqDisplayHeight + freqHistoryHeight, i*w + w, freqDisplayHeight + freqHistoryHeight - freqStrength*freqGraphFactor);
 		
-		rect(i*w, freqDisplayHeight + freqHistoryHeight, i*w + w, freqDisplayHeight + freqHistoryHeight - freqStrength*freqGraphFactor);
 		
 		
-		float whatIHear = freqStrength - this.movingStrengthAverage * (1.0f - this.movingAverageCompareThreshold);
-		if (whatIHear < 0) whatIHear = 0f;
-		// midi: what to do?
-		if (whatIHear > 0 && keys[i].lastStrength == 0) {
-			// midi on
-			ShortMessage msg = new ShortMessage();
-			int velocity = (int)freqStrength;
-			if (velocity > 127) velocity = 127;
-			try {
-				msg.setMessage(ShortMessage.NOTE_ON, 0, i+midiOffset, velocity);
-			} catch (InvalidMidiDataException e) {
-				e.printStackTrace();
+			// MIDI
+			
+			float whatIHear = freqStrength - this.movingStrengthAverage * (1.0f - this.movingAverageCompareThreshold);
+			if (whatIHear < 0) whatIHear = 0f;
+			
+			if (whatIHear > 0 && keys[i].lastStrength == 0) {
+				// midi on
+				ShortMessage msg = new ShortMessage();
+				int velocity = (int)freqStrength;
+				if (velocity > 127) velocity = 127;
+				try {
+					msg.setMessage(ShortMessage.NOTE_ON, 0, i+midiOffset, velocity);
+				} catch (InvalidMidiDataException e) {
+					e.printStackTrace();
+				}
+				receiver.send(msg, -1);
+				keys[i].lastStrength = whatIHear;
+			} else if (whatIHear == 0 && keys[i].lastStrength > 0) {
+				// midi off
+				ShortMessage msg = new ShortMessage();
+				try {
+					msg.setMessage(ShortMessage.NOTE_OFF, 0, i+midiOffset, 0);
+				} catch (InvalidMidiDataException e) {
+					e.printStackTrace();
+				}
+				receiver.send(msg, -1);
+				keys[i].lastStrength = whatIHear;
 			}
-			receiver.send(msg, -1);
-			keys[i].lastStrength = whatIHear;
-		} else if (whatIHear == 0 && keys[i].lastStrength > 0) {
-			// midi off
-			ShortMessage msg = new ShortMessage();
-			try {
-				msg.setMessage(ShortMessage.NOTE_OFF, 0, i+midiOffset, 0);
-			} catch (InvalidMidiDataException e) {
-				e.printStackTrace();
-			}
-			receiver.send(msg, -1);
-			keys[i].lastStrength = whatIHear;
-		}
-		
-		
-		freqArray[i] = freqStrength;
-		if (freqStrength > strongestPitch) strongestPitch = freqStrength;
-		
-		
-		historyBuffer.fill(log(freqArray[i]+1)*42);
-		historyBuffer.rect(i*w, freqHistoryHeight, w, -lineHeight + 1);
+			
+			
+			freqArray[i] = freqStrength;
+			if (freqStrength > strongestPitch) strongestPitch = freqStrength;
+			
+			
+			historyBuffer.fill(log(freqArray[i]+1)*42);
+			historyBuffer.rect(i*w, freqHistoryHeight, w, -lineHeight + 1);
 		
 		
 		
@@ -365,22 +369,17 @@ public class PlayItSam extends PApplet {
 	      
 	      
 	    
-	  //scale inscription
-		if (i%octaveSteps == 0)
-  		{
-  			//size(2);
-  			stroke(100);
-  			line(i*w, freqDisplayHeight + freqHistoryHeight, i*w, height);
-  			stroke(100);
-  			line(i*w, freqHistoryHeight, i*w, freqDisplayHeight + freqHistoryHeight);
-  			
-  			text(frequenciesOfInterest[i],i*w+1, height-2);
-  		}
-	  		
-
-	  	  
-	  		
-	  		
+			//scale inscription
+			if (i%octaveSteps == 0)
+			{
+	  			//size(2);
+	  			stroke(100);
+	  			line(i*w, freqDisplayHeight + freqHistoryHeight, i*w, height);
+	  			stroke(100);
+	  			line(i*w, freqHistoryHeight, i*w, freqDisplayHeight + freqHistoryHeight);
+	  			
+	  			text(frequenciesOfInterest[i],i*w+1, height-2);
+			}
 	    
 	  }
 	  
@@ -401,16 +400,8 @@ public class PlayItSam extends PApplet {
 	  stroke(0, 250, 0);
 	  y = (int)(height - this.scaleHeight - this.movingStrengthAverage*this.freqGraphFactor*(1.0f-this.movingAverageCompareThreshold));
 	  line(0, y, width, y);
-	  
-		
-		
-		
-	    
 	    
 	}
-	
-	
-	
 	
 	 
 	@Override
@@ -422,20 +413,6 @@ public class PlayItSam extends PApplet {
 	  minim.stop();
 	  receiver.close();
 	  super.stop();
-	}
-	
-	/**
-	 * 
-	 * @param probe the probe to add 
-	 * @param probeWeight weight of the probe (e.g. 2: double the weight / 0.5 half the weight)
-	 * @param average current calculated average
-	 * @param windowSize  the number of probes taken into consideration - including the new one
-	 * @return
-	 */
-	private float calcMovAverage(float probe, float probeWeight, float average, int windowSize) {
-		return (average * (windowSize - probeWeight) 
-				+ probe * probeWeight)
-				/ windowSize;
 	}
 	
 	
