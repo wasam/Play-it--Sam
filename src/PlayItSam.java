@@ -22,6 +22,9 @@ public class PlayItSam extends PApplet {
 		double threshold = 0;
 		double averageStrength = 0;
 		public float lastStrength = 0f;
+		public float strength = 0f;
+		public int midiKey = -1;
+		public boolean pressed = false;
 	}
 	private Key[] keys;
 	
@@ -30,14 +33,14 @@ public class PlayItSam extends PApplet {
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
+	
+	// GUI variables
 	int lineHeight;
 	int freqHistoryHeight; // height of the area to display freq history
 	int freqDisplayHeight; 
 	int freqDisplayWidth;
 	int scaleHeight; // height of the scale Inscription
-	int minGapLength; //  
-	int maxGapLength; // 
-	float freqGraphFactor = 1f; // how much to amplify the freq graph display
+	float freqGraphFactor = 3f; // how much to amplify the freq graph display
 	
 	
 	
@@ -47,7 +50,7 @@ public class PlayItSam extends PApplet {
 	
 	
 	Minim minim;
-	AudioInput myinput;
+	AudioPlayer myinput;
 	FFT fft;
 
 	
@@ -58,7 +61,7 @@ public class PlayItSam extends PApplet {
 	
 	// moving strength averages
 	int numberOfPeaksForMovingAverage = 42;
-	float movingStrengthAverage = 0f;
+	float movingStrengthAverage = 10f;
 	float decreaseStrengthAverageFactor = 0.5f; // slow down the decreasing in case no peak is detected
 	float movingAverageCompareThreshold = 0.2f;
 	int mainPeakThreshold;
@@ -67,12 +70,12 @@ public class PlayItSam extends PApplet {
 	//RingBuffer<float[]> ourFrequencyBuffer;
 	
 	 
-	
-	
-	float[] freqArray;
-    int octaveSteps = 12;
-    int midiOffset = 36; // we skip the first 3 octaves - so it starts at 36
-	float[] frequenciesOfInterest =
+	private int numStrongestPitches = 3; // how many keys shall be detected max at the same time frame?
+	private Key[] strongestPitches = new Key[numStrongestPitches]; 
+	private float[] freqArray;
+    private int octaveSteps = 12;
+    private int midiOffset = 36; // we skip the first 3 octaves - so it starts at 36
+	private float[] frequenciesOfInterest =
 			{/*16.35f, //C0
 			 17.32f, //C#0/Db0
 			 18.35f, //D0 	
@@ -196,20 +199,24 @@ public class PlayItSam extends PApplet {
 	
 	  size(900, 700, JAVA2D);
 	  
-	  movingAverageCompareThreshold = 0.2f;
+	  movingAverageCompareThreshold = 0.8f;
 	  mainPeakThreshold = 3;
 	  lonelyPeakThreshold = 20;
 	  lineHeight = 5;
 	  scaleHeight = 20;
 	  freqDisplayHeight = 200;
-	  freqDisplayWidth = 800;
+	  freqDisplayWidth = 900;
 	  freqHistoryHeight = height - scaleHeight - freqDisplayHeight;
 	  
 	  
 	  historyBuffer = this.createGraphics(width, freqHistoryHeight, JAVA2D); 
 	 
 	  minim = new Minim(this);
-	  myinput = minim.getLineIn(Minim.MONO, 2048, 44100f);
+	  //myinput = minim.getLineIn(Minim.MONO, 2048, 44100f);
+	  myinput = minim.loadFile("elise.mp3", 2048);
+	  myinput.loop();
+	  myinput.mute();
+	  myinput.setVolume(2.0f);
 	  
 	  
 	  // reset framerate
@@ -225,13 +232,15 @@ public class PlayItSam extends PApplet {
 	  rectMode(CORNERS);
 	  
 	  
-	  //ourFrequencyBuffer = new RingBuffer<float[]>(freqHistoryHeight/lineHeight);
 	  
 	  
 	  
 	  freqArray = new float[frequenciesOfInterest.length];
 	  keys = new Key[frequenciesOfInterest.length];
-	  for (int i = 0; i < keys.length; i++) keys[i] = new Key();
+	  for (int i = 0; i < keys.length; i++) {
+		  keys[i] = new Key();
+		  keys[i].midiKey = i + midiOffset;
+	  }
 	  
 	  try {
 		  receiver = MidiSystem.getReceiver();
@@ -278,9 +287,10 @@ public class PlayItSam extends PApplet {
 	@Override
 	public void draw()
 	{
-		
-		strokeWeight(1);
-		background(0);
+		if (drawAnalysis) {
+			strokeWeight(1);
+			background(0);
+		}
 	  
 		int w = new Integer(freqDisplayWidth/frequenciesOfInterest.length);
 		  
@@ -292,15 +302,19 @@ public class PlayItSam extends PApplet {
 		  
 		boolean thereHasBeenAPeak = false;
 		  
-		historyBuffer.beginDraw();
-		historyBuffer.copy(0, lineHeight, historyBuffer.width, historyBuffer.height-lineHeight, 
-			  0, 0, historyBuffer.width, historyBuffer.height-lineHeight);
+		if (drawAnalysis) {
+			historyBuffer.beginDraw();
+			historyBuffer.copy(0, lineHeight, historyBuffer.width, historyBuffer.height-lineHeight, 
+					0, 0, historyBuffer.width, historyBuffer.height-lineHeight);
+		}
 	  
 	  
 	  
 	  
 	  
-	 
+	    for (int i = 0; i < keys.length; i++) {
+	    	keys[i].lastStrength = keys[i].strength;
+	    }
 	  
 	  
 	  
@@ -314,63 +328,34 @@ public class PlayItSam extends PApplet {
 		for(int i = 0; i < frequenciesOfInterest.length; i++)
 		{
 		
-			noStroke();
-			fill(100);
+			
 		    // draw a rectangle for each average, multiply the value by 5 so we can see it better
 			float freqStrength = fft.getFreq(frequenciesOfInterest[i]);
 			//System.out.println(freqStrength);
 			
-			rect(i*w, freqDisplayHeight + freqHistoryHeight, i*w + w, freqDisplayHeight + freqHistoryHeight - freqStrength*freqGraphFactor);
-		
-		
-		
-			// MIDI
-			
-			float whatIHear = freqStrength - this.movingStrengthAverage * (1.0f - this.movingAverageCompareThreshold);
-			if (whatIHear < 0) whatIHear = 0f;
-			
-			if (whatIHear > 0 && keys[i].lastStrength == 0) {
-				// midi on
-				ShortMessage msg = new ShortMessage();
-				int velocity = (int)freqStrength;
-				if (velocity > 127) velocity = 127;
-				try {
-					msg.setMessage(ShortMessage.NOTE_ON, 0, i+midiOffset, velocity);
-				} catch (InvalidMidiDataException e) {
-					e.printStackTrace();
-				}
-				receiver.send(msg, -1);
-				keys[i].lastStrength = whatIHear;
-			} else if (whatIHear == 0 && keys[i].lastStrength > 0) {
-				// midi off
-				ShortMessage msg = new ShortMessage();
-				try {
-					msg.setMessage(ShortMessage.NOTE_OFF, 0, i+midiOffset, 0);
-				} catch (InvalidMidiDataException e) {
-					e.printStackTrace();
-				}
-				receiver.send(msg, -1);
-				keys[i].lastStrength = whatIHear;
+			if (drawAnalysis) {
+				noStroke();
+				fill(100);
+				rect(i*w, freqDisplayHeight + freqHistoryHeight, i*w + w, freqDisplayHeight + freqHistoryHeight - freqStrength*freqGraphFactor);
 			}
-			
-			
+		
 			freqArray[i] = freqStrength;
-			if (freqStrength > strongestPitch) strongestPitch = freqStrength;
+		
 			
 			
-			historyBuffer.fill(log(freqArray[i]+1)*42);
-			historyBuffer.rect(i*w, freqHistoryHeight, w, -lineHeight + 1);
+			if (drawAnalysis) {
+				historyBuffer.noStroke();
+				if (keys[i].pressed) {
+					historyBuffer.fill(log(freqArray[i]+1)*42);
+				} else {
+					historyBuffer.fill(0, 0, log(freqArray[i]+1)*42);
+				}
+				historyBuffer.rect(i*w, freqHistoryHeight, w, -lineHeight + 1);
+			}
 		
-		
-		
-	    
-	     
-	   
-	      
-	      
 	    
 			//scale inscription
-			if (i%octaveSteps == 0)
+			if (i%octaveSteps == 0 && drawAnalysis)
 			{
 	  			//size(2);
 	  			stroke(100);
@@ -382,36 +367,117 @@ public class PlayItSam extends PApplet {
 			}
 	    
 	  }
+		
+		// analyse frequency array
+		for (int i = 1; i < freqArray.length-1; i++) { // missing out the 1st and last freqArraypos on purpose
+			float freqStrength = freqArray[i];
+			// MIDI
+			
+			float whatIHear = freqStrength - this.movingStrengthAverage * (1.0f - this.movingAverageCompareThreshold);
+			if (whatIHear < 0) whatIHear = 0f;
+			
+			// what do we actually hear?
+			if (whatIHear > 0) {
+				
+				keys[i].strength = freqStrength;
+				
+				if (keys[i].strength > keys[i].lastStrength*2
+						&& keys[i].strength > freqArray[i+1]
+								&& keys[i].strength >= freqArray[i-1]) {
+					insertPitch(keys[i]);
+				}
+			} else if (whatIHear == 0 && keys[i].lastStrength > 0
+					&& keys[i].pressed) {
+				// midi off
+				ShortMessage msg = new ShortMessage();
+				try {
+					msg.setMessage(ShortMessage.NOTE_OFF, 0, i+midiOffset, 0);
+				} catch (InvalidMidiDataException e) {
+					e.printStackTrace();
+				}
+				receiver.send(msg, -1);
+				keys[i].strength = whatIHear;
+				keys[i].pressed = false;
+				
+				if (drawAnalysis) {
+					historyBuffer.noFill();
+					historyBuffer.stroke(200, 0, 0);
+					historyBuffer.rect(i*w, freqHistoryHeight, w, -lineHeight + 1);
+				}
+			}
+			
+			
+			if (whatIHear > strongestPitch) strongestPitch = freqStrength;
+		}
+		
+		// create midi Note On signals
+		for (int i = 0; i < strongestPitches.length; i++) {
+			Key k = strongestPitches[i]; strongestPitches[i] = null;
+			if (k != null) {
+				// midi on
+				ShortMessage msg = new ShortMessage();
+				int velocity = (int)k.strength;
+				if (velocity > 127) velocity = 127;
+				try {
+					msg.setMessage(ShortMessage.NOTE_ON, 0, k.midiKey, velocity);
+				} catch (InvalidMidiDataException e) {
+					e.printStackTrace();
+				}
+				receiver.send(msg, -1);
+				k.pressed = true;
+				if (drawAnalysis) {
+					historyBuffer.noFill();
+					historyBuffer.stroke(0, 200, 0);
+					historyBuffer.rect((k.midiKey-midiOffset)*w, freqHistoryHeight, w, -lineHeight + 1);
+				}
+			}
+		}
 	  
 	  
 	  historyBuffer.endDraw();
-	  image(historyBuffer, 0, 0);
+	  if (drawAnalysis) image(historyBuffer, 0, 0);
 	  
 	  
 	  // calc average
-	  this.movingStrengthAverage = (movingStrengthAverage * (this.numberOfPeaksForMovingAverage  - 1)
+	  this.movingStrengthAverage = 
+			  (movingStrengthAverage * (this.numberOfPeaksForMovingAverage  - (1 - (strongestPitch==0?this.decreaseStrengthAverageFactor:0)))
 			  + strongestPitch)/this.numberOfPeaksForMovingAverage;
 	  
 	  	
 	  // draw average
-	  stroke(150, 0, 0);
-	  int y = (int)(height - this.scaleHeight - this.movingStrengthAverage*this.freqGraphFactor);
-	  line(0, y, width, y);
-	  stroke(0, 250, 0);
-	  y = (int)(height - this.scaleHeight - this.movingStrengthAverage*this.freqGraphFactor*(1.0f-this.movingAverageCompareThreshold));
-	  line(0, y, width, y);
+	  if (drawAnalysis) {
+		  stroke(150, 0, 0);
+		  int y = (int)(height - this.scaleHeight - this.movingStrengthAverage*this.freqGraphFactor);
+		  line(0, y, width, y);
+		  stroke(0, 250, 0);
+		  y = (int)(height - this.scaleHeight - this.movingStrengthAverage*this.freqGraphFactor*(1.0f-this.movingAverageCompareThreshold));
+		  line(0, y, width, y);
+	  }
 	    
 	}
 	
-	 
+	private void insertPitch(Key k) {
+		Key currentKey = k;
+		for (int i = 0; i < this.strongestPitches.length; i++) {
+			if (strongestPitches[i] == null || strongestPitches[i].strength < currentKey.strength) {
+				Key tempStorage = strongestPitches[i];
+				strongestPitches[i] = currentKey;
+				currentKey = tempStorage;
+			}
+		}
+	}
+	
+	
+	
 	@Override
 	public void stop()
 	{
+		receiver.close();
 	  // always close Minim audio classes when you are done with them
 	  myinput.close();
 	  // always stop Minim before exiting
 	  minim.stop();
-	  receiver.close();
+	  
 	  super.stop();
 	}
 	
